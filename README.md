@@ -131,25 +131,16 @@ Row Level Security ensures:
 
 ## Challenges Faced and Solutions
 
-### 1. Google OAuth Redirect Issue
+### 1. Row Not Inserting Into Database
 
-**Problem:** After login, the user was redirected back to the home page instead of the dashboard.
-
-**Solution:**
-- Added explicit `redirectTo` option inside `signInWithOAuth`
-- Verified authorized redirect URI in Google Cloud Console
-- Ensured correct callback URL in Supabase
-
-### 2. Row Not Inserting Into Database
-
-**Problem:** Bookmark insert was failing because user_id column was NOT NULL.
+**Problem:** Bookmark insert failed because `user_id` column was NOT NULL.
 
 **Solution:**
 - Retrieved current session using `supabase.auth.getSession()`
 - Attached `user_id: session.user.id` during insert
 - Added proper RLS insert policy
 
-### 3. Data Not Showing in Frontend
+### 2. Data Not Showing in Frontend
 
 **Problem:** Bookmarks were not visible after insertion.
 
@@ -158,32 +149,42 @@ Row Level Security ensures:
 **Solution:**
 - Created explicit SELECT policy
 - Verified `auth.uid() = user_id` condition
-- Confirmed logged-in user ID matches row user_id
+- Confirmed logged-in user ID matches row `user_id`
 
-### 4. Delete Not Working
+### 3. Realtime Updates Not Working Across Tabs
 
-**Problem:** Delete operation executed but UI did not update.
+**Problem:** When a bookmark was added or deleted in one tab, the other tab did not update automatically.
 
-**Solution:**
-- Added manual state update after delete
-- Ensured delete RLS policy exists
-- Verified correct row ID is passed
-
-### 5. Environment Variable Misconfiguration
-
-**Problem:** App failed to connect to Supabase due to incorrect variable name.
+**Root Cause:**
+- Realtime subscription was not implemented initially
+- `bookmarks` table was not added to `supabase_realtime` publication
+- DELETE events were not firing (PostgreSQL does not send old row data by default)
 
 **Solution:**
-- Used correct variable name `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- Restarted dev server after modifying `.env.local`
+- Implemented Supabase Realtime subscription using `.channel().on("postgres_changes")`
+- Added `bookmarks` table to `supabase_realtime` under Database → Publications
+- Enabled full replica identity to receive DELETE payloads:
 
-### 6. Client vs Server Component Error (Next.js)
+```sql
+ALTER TABLE bookmarks REPLICA IDENTITY FULL;
+```
 
-**Problem:** Event handlers caused runtime error because component was treated as Server Component.
+**Result:**
+- INSERT updates sync instantly across tabs
+- DELETE updates sync instantly across tabs
+- No manual page refresh required
+
+### 4. Delete Operation Only Updating After Refresh
+
+**Problem:** Delete appeared to work in the current tab but did not update other tabs until refresh.
+
+**Root Cause:** `payload.old` was empty because replica identity was not set to FULL.
 
 **Solution:**
-- Added `"use client"` at the top of interactive components
-- Ensured it was the first line in the file
+- Executed `ALTER TABLE bookmarks REPLICA IDENTITY FULL;`
+- Created explicit DELETE event listener in realtime subscription
+
+
 
 ## Deployment
 
