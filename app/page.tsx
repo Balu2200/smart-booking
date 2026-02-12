@@ -16,7 +16,7 @@ export default function Home() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: "https://smart-booking-eight.vercel.app/dashboard",
+        redirectTo: `${window.location.origin}/dashboard`,
       },
     });
   };
