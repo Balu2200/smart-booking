@@ -18,7 +18,7 @@ export default function Dashboard() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-
+ 
   const fetchBookmarks = async (uid: string) => {
     const { data, error } = await supabase
       .from("bookmarks")
@@ -34,8 +34,9 @@ export default function Dashboard() {
     setBookmarks(data || []);
   };
 
-
   useEffect(() => {
+    let channel: any;
+
     const init = async () => {
       const { data } = await supabase.auth.getSession();
 
@@ -46,33 +47,64 @@ export default function Dashboard() {
 
       const uid = data.session.user.id;
       setUserId(uid);
+
       await fetchBookmarks(uid);
       setLoading(false);
+
+
+      channel = supabase
+        .channel("realtime-bookmarks")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "bookmarks",
+            filter: `user_id=eq.${uid}`,
+          },
+          (payload) => {
+            if (payload.eventType === "INSERT") {
+              setBookmarks((prev) => {
+                const exists = prev.find((b) => b.id === payload.new.id);
+                if (exists) return prev;
+                return [payload.new as Bookmark, ...prev];
+              });
+            }
+
+            if (payload.eventType === "DELETE") {
+              setBookmarks((prev) =>
+                prev.filter((b) => b.id !== payload.old.id)
+              );
+            }
+          }
+        )
+        .subscribe();
     };
 
     init();
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
 
   const addBookmark = async () => {
     if (!title || !url || !userId) return;
 
-    const { data, error } = await supabase
-      .from("bookmarks")
-      .insert({
-        title,
-        url,
-        user_id: userId,
-      })
-      .select()
-      .single();
+    const { error } = await supabase.from("bookmarks").insert({
+      title,
+      url,
+      user_id: userId,
+    });
 
     if (error) {
       console.error("INSERT ERROR:", error);
       return;
     }
 
-    setBookmarks((prev) => [data, ...prev]);
     setTitle("");
     setUrl("");
   };
@@ -86,12 +118,8 @@ export default function Dashboard() {
 
     if (error) {
       console.error("DELETE ERROR:", error);
-      return;
     }
-
-    setBookmarks((prev) => prev.filter((b) => b.id !== id));
   };
-
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -118,6 +146,7 @@ export default function Dashboard() {
             Logout
           </button>
         </div>
+
         <div className="flex gap-3 mb-6">
           <input
             placeholder="Title"
@@ -125,12 +154,14 @@ export default function Dashboard() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
+
           <input
             placeholder="URL"
             className="flex-1 bg-zinc-700 px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-green-500"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
+
           <button
             onClick={addBookmark}
             className="bg-green-600 px-5 py-2 rounded-lg hover:bg-green-700 transition"
@@ -138,6 +169,7 @@ export default function Dashboard() {
             Add
           </button>
         </div>
+
         <div className="space-y-3">
           {bookmarks.length === 0 && (
             <p className="text-zinc-400 text-sm">
